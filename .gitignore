@@ -1,0 +1,10 @@
+# Nix
+result
+result-*
+.direnv/
+
+# Editor
+.luarc.json
+
+# OS
+.DS_Store

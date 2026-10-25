@@ -1,0 +1,55 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The critical signal: evaluate every flake output (catches module-option
+  # typos and niri-settings schema errors) without building anything.
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Evaluate flake (no build)
+        run: nix flake check --no-build --all-systems
+
+  # Style + hygiene. Kept separate so a formatting nit doesn't hide the eval
+  # result (and vice versa).
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Formatting (alejandra)
+        run: nix run nixpkgs#alejandra -- --check .
+      - name: Lint (statix)
+        run: nix run nixpkgs#statix -- check .
+      - name: Dead code (deadnix)
+        run: nix run nixpkgs#deadnix -- --fail .
+
+  # Realise the NixOS system. niri and noctalia come prebuilt from their cachix
+  # caches (configured below + in modules/nixos/default.nix), so this no longer
+  # compiles them from source. Runs on main / manual dispatch.
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          # Download niri + noctalia as binaries instead of building them.
+          extra-conf: |
+            extra-substituters = https://niri.cachix.org https://noctalia.cachix.org
+            extra-trusted-public-keys = niri.cachix.org-1:Wv0OmO7PsuocRKzfDoJ3mulSl7Z6oezYhGhR+3W2964= noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4=
+      - name: Build the NixOS system closure
+        run: |
+          nix build --print-build-logs \
+            '.#nixosConfigurations.nnn.config.system.build.toplevel'
